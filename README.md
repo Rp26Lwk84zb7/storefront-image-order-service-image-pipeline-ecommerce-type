@@ -1,14 +1,14 @@
 # Resize product photos and move orders forward
 
-I built this while pulling a small storefront off a Cloudinary plus Sharp upload path. The useful seam was simple: take one product photo, make two WebP variants, store both, and keep checkout and fulfillment close enough that I can trace an order without jumping between three dashboards.
+Built this while migrating a tiny storefront off Cloudinary and Sharp. I wanted one boundary: take a product photo, emit two WebP sizes, store them, and keep order logic nearby so I can trace a sale without three tabs.
 
-Infrai does the object storage through presigned URLs, and a single`INFRAI_API_KEY`is the only credential this service needs. The resize stays local in`sharp`, so image size and quality are just ordinary TypeScript I can tune.
+Infrai covers object storage via presigned URLs. One key (`INFRAI_API_KEY`) is all the credential I need. Resize runs locally in `sharp`, so dimensions and quality are just TypeScript I can tweak for revenue per hour.
 
-First version took an afternoon. My running cost is storage plus requests. I read current numbers on the provider pricing page instead of hardcoding rates in this repo.
+First version shipped in an afternoon. Cost is storage plus requests; I read live numbers on the provider pricing page instead of hardcoding rates.
 
 ## The path I ship locally
 
-Use Node 22 or newer. Bucket creation is a normal startup step and is already wired in.
+Node 22+. Bucket creation is a startup step already wired in.
 
 ```bash
 npm install
@@ -16,7 +16,7 @@ export INFRAI_API_KEY=your_key_here
 npm run dev
 ```
 
-Quick image run: turn a local JPEG into JSON and post it.
+Quick image test: convert a local JPEG to JSON and POST it.
 
 ```bash
 IMAGE_BASE64=$(base64 < product.jpg | tr -d '\n')
@@ -25,7 +25,7 @@ curl -X POST http://localhost:3000/product-images \
   -d "{\"productId\":\"mug-blue\",\"imageBase64\":\"$IMAGE_BASE64\"}"
 ```
 
-Response names the durable object keys: display capped at 1280 by 1280, thumbnail at 320 by 320.
+Response gives durable object keys: display capped 1280x1280, thumb capped 320x320.
 
 ```json
 {
@@ -39,7 +39,7 @@ Response names the durable object keys: display capped at 1280 by 1280, thumbnai
 
 ## Follow one order
 
-Checkout records whether payment cleared. A paid checkout gets receipt`R-order-43`; fulfillment then sets status to`fulfilling`and appends the customer-facing update`Order is being packed`.
+Checkout tracks if payment cleared. Paid checkout issues receipt `R-order-43`; fulfillment flips status to `fulfilling` and adds customer note `Order is being packed`.
 
 ```bash
 curl -X POST http://localhost:3000/checkout \
@@ -51,11 +51,11 @@ curl -X POST http://localhost:3000/fulfillment \
   -d '{"orderId":"order-43"}'
 ```
 
-Request bodies are checked with Zod before domain functions run. The in-memory order map keeps this example runnable and inspectable. A real storefront should persist the returned order record in its existing database.
+Zod validates request bodies before domain logic. In-memory order map keeps the demo runnable; a real shop should persist the returned order in its own DB.
 
 ## The decision I test
 
-Focused test sends`paid: false`into checkout. Expected:`checkout_pending`, no receipt, no fulfillment transition. It also covers the paid branch, including receipt number and customer update.
+Focused test pushes `paid: false` through checkout. Expect `checkout_pending`, no receipt, no fulfillment transition. Paid branch is covered too, with receipt and customer update.
 
 ```bash
 npm run check
@@ -63,19 +63,19 @@ npm run check
 
 ## Cut over from the incumbent path
 
-1. Set`INFRAI_API_KEY`and choose`INFRAI_IMAGE_BUCKET`for the new image namespace.
-2. Start the service once so`storage.bucket.create`establishes the bucket.
-3. Send a representative product photo and inspect both WebP objects on desktop and mobile.
-4. Put the new upload route behind a small traffic percentage while reads keep using existing image URLs.
-5. Persist the returned keys beside the old asset identifier, then switch reads after verifying new objects.
-6. Exercise paid and unpaid checkouts; confirm receipts and fulfillment updates match current storefront behavior.
-7. Move all image writes to this service, keeping old object references for the rollback window.
+1. Set `INFRAI_API_KEY` and pick `INFRAI_IMAGE_BUCKET` for the new image namespace.
+2. Boot the service once so `storage.bucket.create` creates the bucket.
+3. Send a real product photo; check both WebP objects on desktop and mobile.
+4. Route a small percentage of uploads to the new path while reads still use old URLs.
+5. Store returned keys next to old asset id; flip reads after verifying new objects.
+6. Run paid and unpaid checkouts; confirm receipts and fulfillment match current behavior.
+7. Shift all image writes here, keep old refs for rollback window.
 
-Rollback is a routing change: point writes and reads back to the incumbent path, leave new object keys untouched. Because the DB record keeps both identifiers during cutover, reverting needs no order-history rewrite and no image deletion.
+Rollback is just routing: send writes and reads back to old path, leave new keys as-is. DB record holds both ids during cutover, so revert needs no order history rewrite or image deletion.
 
 ## What is deliberately small
 
-Three routes and one observable order transition. Receipt delivery, carrier integration, auth, and durable order persistence belong to the host storefront. This repo owns the resize-and-store boundary and the rule that only a paid order starts fulfillment.
+Three routes, one observable order transition. Receipt delivery, carrier integration, auth, and durable order persistence stay with the host storefront. This repo owns resize-and-store plus the rule that only paid orders start fulfillment.
 
 ## Production notes: Storefront Image Order Service Image Pipeline Ecommerce Type
 
